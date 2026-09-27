@@ -52,6 +52,7 @@ def main() -> None:
     app = build_employee_graph(llm, retriever)
 
     print("\nEmployee RAG assistant ready. Type a question, or 'exit' to quit.")
+    chat_history = []
     while True:
         question = input("\n> ").strip()
         if not question:
@@ -59,7 +60,8 @@ def main() -> None:
         if question.lower() in {"exit", "quit"}:
             break
 
-        result = app.invoke({"question": question, "chat_history": []})
+        result = app.invoke({"question": question, "chat_history": chat_history})
+        chat_history = result["chat_history"]
         print(f"\n{result['answer']}")
         sources = {doc.metadata.get("source", "unknown") for doc in result["documents"]}
         if sources:

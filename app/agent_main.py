@@ -42,13 +42,16 @@ def main() -> None:
     documents_dir = os.getenv("DOCUMENTS_DIR", "documents")
     persist_dir = os.getenv("VECTOR_STORE_DIR", ".vector_store")
 
+    java_agent_url = os.getenv("EMPLOYEE_AGENT_A2A_URL", "http://localhost:8080/a2a")
+
     vector_store = get_or_build_vector_store(documents_dir, persist_dir)
     retriever = get_retriever(vector_store)
     employee_service = get_employee_service()
     llm = get_agent_llm()
-    app = build_employee_agent_graph(llm, retriever, employee_service)
+    app = build_employee_agent_graph(llm, retriever, employee_service, java_agent_url)
 
     print("\nEmployee agent ready (policy + employee lookups). Type a question, or 'exit' to quit.")
+    messages = []
     while True:
         question = input("\n> ").strip()
         if not question:
@@ -56,8 +59,11 @@ def main() -> None:
         if question.lower() in {"exit", "quit"}:
             break
 
-        result = app.invoke({"messages": [HumanMessage(content=question)]})
-        print(f"\n{result['messages'][-1].content}")
+        messages.append(HumanMessage(content=question))
+        result = app.invoke({"messages": messages})
+        messages = result["messages"]
+
+        print(f"\n{messages[-1].content}")
 
 
 if __name__ == "__main__":

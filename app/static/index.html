@@ -348,6 +348,7 @@
   const questionInput = document.getElementById('question');
   const sendBtn = document.getElementById('send-btn');
   const emptyState = document.getElementById('empty-state');
+  let conversationHistory = []; // [{role: 'user'|'assistant', content: string}]
 
   function addMessage(role, text) {
     if (emptyState) emptyState.remove();
@@ -401,7 +402,7 @@
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, history: conversationHistory }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -411,6 +412,8 @@
       typingRow.querySelector('.bubble').classList.remove('typing');
       typingRow.querySelector('.bubble').textContent = data.answer;
       addSteps(typingRow, data.steps);
+      conversationHistory.push({ role: 'user', content: question });
+      conversationHistory.push({ role: 'assistant', content: data.answer });
     } catch (err) {
       typingRow.querySelector('.bubble').classList.remove('typing');
       typingRow.querySelector('.bubble').textContent = 'Something went wrong: ' + err.message;

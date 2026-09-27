@@ -10,7 +10,13 @@ from rag.retriever import Retriever
 
 def make_retrieve_node(retriever: Retriever):
     def retrieve_node(state: EmployeeGraphState) -> dict:
-        documents = retriever.retrieve(state["question"])
+        history = state.get("chat_history") or []
+        # A bare follow-up ("what about 7 years?") retrieves poorly on its
+        # own -- fold in the last couple of prior questions so the vector
+        # search still has the topic keywords (e.g. "vacation days").
+        recent_questions = [m.content for m in history if isinstance(m, HumanMessage)][-2:]
+        query = "\n".join([*recent_questions, state["question"]])
+        documents = retriever.retrieve(query)
         return {"documents": documents}
 
     return retrieve_node
@@ -22,6 +28,7 @@ def make_generate_node(llm: BaseChatModel):
             {
                 "context": format_docs(state["documents"]),
                 "question": state["question"],
+                "chat_history": state.get("chat_history") or [],
             }
         )
         response = llm.invoke(prompt_value)
