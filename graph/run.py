@@ -7,7 +7,7 @@ executor, so the invoke-and-extract logic lives in exactly one place.
 
 from dataclasses import dataclass, field
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 
 @dataclass
@@ -16,8 +16,10 @@ class AgentRunResult:
     tool_calls: list[tuple[str, str]] = field(default_factory=list)  # (tool name, result)
 
 
-def run_agent_graph(graph, question: str) -> AgentRunResult:
-    result = graph.invoke({"messages": [HumanMessage(content=question)]})
+def run_agent_graph(
+    graph, question: str, history: list[BaseMessage] | None = None
+) -> AgentRunResult:
+    result = graph.invoke({"messages": [*(history or []), HumanMessage(content=question)]})
     messages = result["messages"]
 
     tool_calls = [

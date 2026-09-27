@@ -1,6 +1,6 @@
 """Prompt templates for the employee RAG assistant."""
 
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 SYSTEM_PROMPT = """You are an internal assistant that answers employee questions using only \
 the provided company document excerpts. Follow these rules:
@@ -14,6 +14,7 @@ don't have that information and suggest the employee contact HR.
 ANSWER_PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", SYSTEM_PROMPT),
+        MessagesPlaceholder("chat_history", optional=True),
         (
             "human",
             "Context:\n{context}\n\nQuestion: {question}",

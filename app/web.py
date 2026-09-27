@@ -24,6 +24,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
 from app.agent_main import get_agent_llm
@@ -56,8 +57,14 @@ _graph = build_employee_agent_graph(_llm, _retriever, _employee_service, java_ag
 mount_a2a_routes(app, _graph, self_url=os.getenv("SELF_A2A_URL", "http://localhost:8000/a2a"))
 
 
+class HistoryMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
 class AskRequest(BaseModel):
     question: str
+    history: list[HistoryMessage] = []
 
 
 class ToolStep(BaseModel):
@@ -91,7 +98,11 @@ def ask(request: AskRequest) -> AskResponse:
     if not question:
         raise HTTPException(status_code=400, detail="question must not be empty.")
 
-    run_result = run_agent_graph(_graph, question)
+    history = [
+        HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content)
+        for m in request.history
+    ]
+    run_result = run_agent_graph(_graph, question, history)
     steps = [ToolStep(tool=name, result=result) for name, result in run_result.tool_calls]
 
     return AskResponse(answer=run_result.answer, steps=steps)
