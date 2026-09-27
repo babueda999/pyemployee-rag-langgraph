@@ -1,0 +1,8 @@
+{
+  "enabledMcpjsonServers": [
+    "employee-rag-pgvector",
+    "github",
+    "jira"
+  ],
+  "enableAllProjectMcpServers": true
+}
