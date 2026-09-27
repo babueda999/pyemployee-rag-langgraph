@@ -61,7 +61,7 @@ def test_policy_only_question_calls_only_policy_search():
     retriever = FakeRetriever()
     employee_service = FakeEmployeeService(employees=[])
 
-    graph = build_employee_agent_graph(llm, retriever, employee_service)
+    graph = build_employee_agent_graph(llm, retriever, employee_service, "http://localhost:8080/a2a")
     result = graph.invoke({"messages": [HumanMessage(content="What is the vacation policy?")]})
 
     assert retriever.calls == ["vacation policy"]
@@ -89,7 +89,7 @@ def test_employee_only_question_calls_only_employee_tool():
     }
     employee_service = FakeEmployeeService(employees=[employee])
 
-    graph = build_employee_agent_graph(llm, retriever, employee_service)
+    graph = build_employee_agent_graph(llm, retriever, employee_service, "http://localhost:8080/a2a")
     result = graph.invoke(
         {"messages": [HumanMessage(content="What department does employee 1 belong to?")]}
     )
@@ -127,7 +127,7 @@ def test_combined_question_calls_both_tools_before_final_answer():
     }
     employee_service = FakeEmployeeService(employees=[employee])
 
-    graph = build_employee_agent_graph(llm, retriever, employee_service)
+    graph = build_employee_agent_graph(llm, retriever, employee_service, "http://localhost:8080/a2a")
     result = graph.invoke(
         {"messages": [HumanMessage(content="Is employee 1 eligible for remote work?")]}
     )
@@ -149,7 +149,7 @@ def test_unavailable_employee_reported_without_hallucinating():
     retriever = FakeRetriever()
     employee_service = FakeEmployeeService(employees=[])
 
-    graph = build_employee_agent_graph(llm, retriever, employee_service)
+    graph = build_employee_agent_graph(llm, retriever, employee_service, "http://localhost:8080/a2a")
     result = graph.invoke(
         {"messages": [HumanMessage(content="What department does employee 999 belong to?")]}
     )
