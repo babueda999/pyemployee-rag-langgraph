@@ -102,6 +102,27 @@ reference (`-e NAME` with no value) so they never appear in argv/process listing
   it stays alongside the code it wraps rather than in the generic `mcp/` folder.
 - New MCP servers only load at Claude Code session startup — restart/reconnect after adding one.
 
+## Git / GitHub workflow
+
+Repo: https://github.com/babueda999/pyemployee-rag-langgraph. Branches: `dev` (work here) ->
+PR -> `main` (protected target). `.github/workflows/sync-dev-with-main.yml` runs on every push
+to `main` and merges `main` back into `dev` automatically, so `dev` never drifts after a merge —
+don't hand-merge `main` into `dev`, let the workflow do it.
+
+Gotcha hit once: the local `GITHUB_PAT` env var is the `employee-services-mcp` fine-grained
+token (name predates this repo, originally scoped only to `employee-servicves-main`) — not the
+similarly-named `GithubToken` also present in the account. Don't assume the token matching a
+generic name is the one actually in use; check `github-authentication-token-expiration` in a
+response header (or just test a write) against the token list at
+https://github.com/settings/personal-access-tokens to confirm which one it is. Currently scoped
+to `babueda999/employee-services` and `babueda999/pyemployee-rag-langgraph` with Contents,
+Pull requests, and Workflows set to read/write. Editing a fine-grained token's scopes requires a
+sudo-mode email re-verification in the browser — can't be done via the API.
+
+Open items: branch protection on `main` isn't set up yet (needs the `Administration` scope added
+to the token first); the repo is public, not private; `GithubToken` was left scoped to this repo
+with Contents read/write from debugging and is unused — see `plan.md`.
+
 ## Testing
 
 `pytest` from the project root. Existing tests (`test_chunker.py`, `test_vector_store.py`) must
