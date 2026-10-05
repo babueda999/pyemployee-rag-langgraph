@@ -13,16 +13,16 @@ def run(tool, tool_input):
     return asyncio.run(tool.ainvoke(tool_input))
 
 
-def make_tool(monkeypatch, reply="Employee 7's salary is now $88,000.", error=None):
-    async def fake_send(base_url, text):
+def make_tool(monkeypatch, reply="Employee 7's salary is now $88,000.", error=None, role="MANAGER"):
+    async def fake_send(base_url, text, auth_role):
         if error:
             raise error
-        fake_send.calls.append((base_url, text))
+        fake_send.calls.append((base_url, text, auth_role))
         return reply
 
     fake_send.calls = []
     monkeypatch.setattr(a2a_tools, "_send_to_java_agent", fake_send)
-    return a2a_tools.make_java_agent_delegate_tool("http://localhost:8080/a2a"), fake_send
+    return a2a_tools.make_java_agent_delegate_tool("http://localhost:8080/a2a", role=role), fake_send
 
 
 def test_rejects_empty_request(monkeypatch):
@@ -43,6 +43,28 @@ def test_refuses_delete_without_calling_java_agent(monkeypatch):
     assert fake_send.calls == []
 
 
+def test_refuses_delete_for_user_role(monkeypatch):
+    tool, fake_send = make_tool(monkeypatch, role="USER")
+
+    result = run(tool, {"request": "delete employee 7"})
+
+    assert "does not perform deletions" in result
+    assert fake_send.calls == []
+
+
+def test_forwards_delete_request_for_admin_role(monkeypatch):
+    tool, fake_send = make_tool(
+        monkeypatch, reply="Deletion of employee 7 requires confirmation.", role="ADMIN"
+    )
+
+    result = run(tool, {"request": "delete employee 7"})
+
+    assert "requires confirmation" in result
+    assert fake_send.calls == [
+        ("http://localhost:8080/a2a", "delete employee 7", "ADMIN")
+    ]
+
+
 def test_forwards_update_request_and_returns_reply(monkeypatch):
     tool, fake_send = make_tool(monkeypatch, reply="Employee 7's department is now Sales.")
 
@@ -50,7 +72,7 @@ def test_forwards_update_request_and_returns_reply(monkeypatch):
 
     assert result == "Employee 7's department is now Sales."
     assert fake_send.calls == [
-        ("http://localhost:8080/a2a", "update employee 7's department to Sales")
+        ("http://localhost:8080/a2a", "update employee 7's department to Sales", "MANAGER")
     ]
 
 

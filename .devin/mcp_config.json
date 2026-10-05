@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "employee-rag-pgvector": {
+      "command": "C:\\Users\\eanbb\\claudesamples\\pyemployee-rag-langgraph\\pyemployee-rag-langgraph\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\eanbb\\claudesamples\\pyemployee-rag-langgraph\\pyemployee-rag-langgraph\\experiments\\pgvector\\mcp_server.py"],
+      "transport": "stdio"
+    },
+    "github": {
+      "command": "C:\\Users\\eanbb\\claudesamples\\pyemployee-rag-langgraph\\pyemployee-rag-langgraph\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\eanbb\\claudesamples\\pyemployee-rag-langgraph\\pyemployee-rag-langgraph\\mcp\\github_mcp_server.py"],
+      "transport": "stdio"
+    },
+    "jira": {
+      "command": "C:\\Users\\eanbb\\claudesamples\\pyemployee-rag-langgraph\\pyemployee-rag-langgraph\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\eanbb\\claudesamples\\pyemployee-rag-langgraph\\pyemployee-rag-langgraph\\mcp\\jira_mcp_server.py"],
+      "transport": "stdio"
+    }
+  }
+}

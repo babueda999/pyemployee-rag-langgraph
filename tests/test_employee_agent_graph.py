@@ -56,6 +56,7 @@ def test_policy_only_question_calls_only_policy_search():
                 tool_calls=[tool_call("policy_search", {"query": "vacation policy"}, "call_1")],
             ),
             AIMessage(content="Employees get 15-30 vacation days depending on tenure."),
+            AIMessage(content="GROUNDED"),  # verify node judge call
         ]
     )
     retriever = FakeRetriever()
@@ -76,6 +77,7 @@ def test_employee_only_question_calls_only_employee_tool():
                 tool_calls=[tool_call("get_employee", {"employee_id": 1}, "call_1")],
             ),
             AIMessage(content="Employee 1 is in Engineering."),
+            AIMessage(content="GROUNDED"),  # verify node judge call
         ]
     )
     retriever = FakeRetriever()
@@ -112,6 +114,7 @@ def test_combined_question_calls_both_tools_before_final_answer():
                 ],
             ),
             AIMessage(content="Employee 1 (Engineering) is eligible for remote work."),
+            AIMessage(content="GROUNDED"),  # verify node judge call
         ]
     )
     retriever = FakeRetriever(
@@ -144,6 +147,7 @@ def test_unavailable_employee_reported_without_hallucinating():
                 tool_calls=[tool_call("get_employee", {"employee_id": 999}, "call_1")],
             ),
             AIMessage(content="No employee found with id 999, so I can't answer that."),
+            AIMessage(content="GROUNDED"),  # verify node judge call
         ]
     )
     retriever = FakeRetriever()
