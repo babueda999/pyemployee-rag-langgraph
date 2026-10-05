@@ -10,6 +10,7 @@ Run with:
     uvicorn app.web:app --reload --port 8000
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,7 +24,7 @@ from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 
@@ -31,7 +32,7 @@ from app.agent_main import get_agent_llm
 from app.main import get_or_build_vector_store
 from agent.a2a_server import mount_a2a_routes
 from graph.employee_agent_graph import build_employee_agent_graph
-from graph.run import run_agent_graph
+from graph.run import run_agent_graph, stream_agent_graph
 from rag.retriever import get_retriever
 from services.employee_service import (
     EmployeeApiError,
@@ -62,9 +63,33 @@ class HistoryMessage(BaseModel):
     content: str
 
 
+# Roles the Java-side write agent recognizes — surfaced in the UI as the
+# delegation role for employee writes (reads/policy are unrestricted).
+VALID_DELEGATION_ROLES = ("USER", "MANAGER", "ADMIN")
+
+# One compiled graph per delegation role — the role is baked into the
+# delegate tool at build time, so each role needs its own instance.
+_graphs: dict[str, object] = {"MANAGER": _graph}
+
+
+def _graph_for(role: str):
+    role = (role or "").strip().upper()
+    if role not in VALID_DELEGATION_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role must be one of: {', '.join(VALID_DELEGATION_ROLES)}",
+        )
+    if role not in _graphs:
+        _graphs[role] = build_employee_agent_graph(
+            _llm, _retriever, _employee_service, java_agent_url, delegated_role=role
+        )
+    return _graphs[role]
+
+
 class AskRequest(BaseModel):
     question: str
     history: list[HistoryMessage] = []
+    role: str = "MANAGER"
 
 
 class ToolStep(BaseModel):
@@ -75,6 +100,13 @@ class ToolStep(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     steps: list[ToolStep]
+
+
+def _to_langchain_history(history: list[HistoryMessage]):
+    return [
+        HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content)
+        for m in history
+    ]
 
 
 def _service_error_to_http(exc: Exception) -> HTTPException:
@@ -98,14 +130,32 @@ def ask(request: AskRequest) -> AskResponse:
     if not question:
         raise HTTPException(status_code=400, detail="question must not be empty.")
 
-    history = [
-        HumanMessage(content=m.content) if m.role == "user" else AIMessage(content=m.content)
-        for m in request.history
-    ]
-    run_result = run_agent_graph(_graph, question, history)
+    run_result = run_agent_graph(
+        _graph_for(request.role), question, _to_langchain_history(request.history)
+    )
     steps = [ToolStep(tool=name, result=result) for name, result in run_result.tool_calls]
 
     return AskResponse(answer=run_result.answer, steps=steps)
+
+
+@app.post("/api/ask/stream")
+def ask_stream(request: AskRequest) -> StreamingResponse:
+    """Same as POST /api/ask, but streams progress events (Server-Sent
+    Events) as the agent decides to call each tool and gets results back,
+    so the Assistant tab can show a live "what's it doing" log instead of
+    only the final answer.
+    """
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question must not be empty.")
+
+    history = _to_langchain_history(request.history)
+
+    def event_stream():
+        for event in stream_agent_graph(_graph_for(request.role), question, history):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/employees")

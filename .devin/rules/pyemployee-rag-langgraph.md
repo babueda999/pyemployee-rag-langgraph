@@ -1,3 +1,6 @@
+---
+trigger: always_on
+---
 # pyemployee-rag-langgraph
 
 ## Two things live here
@@ -17,13 +20,13 @@ Full architecture/rationale: `C:\Users\eanbb\.claude\plans\cuddly-beaming-puppy.
 `SimpleVectorStore` (`ingestion/vector_store.py`, numpy cosine similarity) + `get_embeddings()`
 (`ingestion/embeddings.py`, local hashing embedder by default; `EMBEDDINGS_PROVIDER=openai`/`voyage`
 for real embeddings) → `Retriever` (`rag/retriever.py`) → `graph/employee_graph.py`:
-`START -> retrieve -> generate -> END` using `ChatAnthropic`. State: `EmployeeGraphState`
-(`graph/state.py`). Run: `python -m app.main`.
+`START -> retrieve -> generate -> verify -> END` using `ChatAnthropic`. State: `EmployeeGraphState`
+(`graph/state.py`, now includes `grounded` flag set by verify). Run: `python -m app.main`.
 
 ## Employee agent
 
 ```
-START -> agent (LLM with tools bound) -> [tool_calls?] -> tools -> agent -> ... -> END
+START -> agent (LLM with tools bound) -> [tool_calls?] -> tools -> agent -> ... -> verify -> END
 ```
 
 - `graph/employee_agent_graph.py` — `build_employee_agent_graph(llm, retriever, employee_service)`.
@@ -84,15 +87,18 @@ and let `get_or_build_vector_store` rebuild it under the current provider.
 
 ## MCP servers (`mcp/`)
 
-Claude-Code-facing MCP integrations live in their own top-level `mcp/` folder — kept separate
+Devin-facing MCP integrations live in their own top-level `mcp/` folder — kept separate
 from the app code the same way `employee-servicves-main` sits as its own sibling project, rather
-than mixed into `app/`/`services/`. Registered in `.mcp.json` (+ `.claude/settings.local.json`).
+than mixed into `app/`/`services/`. Registered in `.devin/mcp_config.json`.
 Each is a thin Python wrapper that loads `.env`, resolves credentials, and `subprocess.run`s the
 matching official/community Docker image over stdio — secrets are forwarded to the container by
 reference (`-e NAME` with no value) so they never appear in argv/process listings.
 
-- `mcp/github_mcp_server.py` — `ghcr.io/github/github-mcp-server`. Token: `GITHUB_PERSONAL_ACCESS_TOKEN`
-  (checked first) or `GITHUB_PAT` (this user's existing env var), either in `.env` or the OS env.
+- `mcp/github_mcp_server.py` — `ghcr.io/github/github-mcp-server`. Token, checked in order:
+  `GITHUB_PERSONAL_ACCESS_TOKEN` → `GITHUB_TOKEN` (this user's current working token, verified
+  2026-10-03 — `api.github.com/user` → `babueda999`) → `GITHUB_PAT` (old `employee-services-mcp`
+  fine-grained PAT, **expired/401** — kept last so it can't shadow the good ones). Either in
+  `.env` or the OS env.
 - `mcp/jira_mcp_server.py` — `ghcr.io/sooperset/mcp-atlassian` (Jira + Confluence). Reads this
   user's existing `JIRA_SITE_URL`/`JIRA_EMAIL`/`JIRA_API_TOKEN` (or the tool's own
   `JIRA_URL`/`JIRA_USERNAME`/`JIRA_API_TOKEN` names, or `.env`) and maps them to what
@@ -100,7 +106,7 @@ reference (`-e NAME` with no value) so they never appear in argv/process listing
 - Not moved here: `experiments/pgvector/mcp_server.py` — that one exposes the pgvector
   *experiment's* own retrieval/answer tools and is tightly coupled to that package's imports, so
   it stays alongside the code it wraps rather than in the generic `mcp/` folder.
-- New MCP servers only load at Claude Code session startup — restart/reconnect after adding one.
+- New MCP servers only load at Devin session startup — restart/reconnect after adding one.
 
 ## Git / GitHub workflow
 
@@ -123,9 +129,37 @@ Open items: branch protection on `main` isn't set up yet (needs the `Administrat
 to the token first); the repo is public, not private; `GithubToken` was left scoped to this repo
 with Contents read/write from debugging and is unused — see `plan.md`.
 
+## Grounding / evaluation
+
+Three layers, added 2026-10-03:
+
+1. **Self-check prompts** — `SYSTEM_PROMPT` and `AGENT_SYSTEM_PROMPT` (`rag/prompts.py`) instruct
+   the model to verify each claim against the context/tool results and name its source.
+2. **Verifier nodes** — `graph/nodes.py::make_verify_node` (RAG graph) and `make_agent_verify_node`
+   (agent graph). LLM-as-judge via `GROUNDEDNESS_PROMPT`: ungrounded answers get one rewrite via
+   `CORRECTION_PROMPT`, re-judged once, and prefixed with `UNGROUNDED_CAVEAT` if still unsupported.
+   The agent verify node judges against ToolMessage contents (skips when no tools ran) and appends
+   a corrected AIMessage so it becomes the final answer. Cost: +1 LLM call per answer (up to 3 on
+   the ungrounded path).
+3. **Offline eval harness** — `evals/` (`dataset.py` question set + `run_eval.py`). Not part of
+   pytest (makes real LLM calls). Run: `python -m evals.run_eval [-v]`. Scores each answer on
+   groundedness (LLM judge, reuses `_check_grounded`), relevance (LLM judge), and keyword presence;
+   exits non-zero unless all pass. Keep `dataset.py` in sync with `documents/sample_policy.txt`.
+
 ## Testing
 
-`pytest` from the project root. Existing tests (`test_chunker.py`, `test_vector_store.py`) must
+`python -m pytest tests/` from the project root (bare `pytest` also collects
+`experiments/pgvector/database_test.py`, which needs `psycopg` + a live Postgres and fails at
+collection). Existing tests (`test_chunker.py`, `test_vector_store.py`) must
 keep passing untouched. New agent tests (`test_employee_service.py`, `test_employee_tools.py`,
 `test_employee_agent_graph.py`) are fully offline — no API keys or running services required —
 using mocked `requests` calls and a scripted fake `BaseChatModel`.
+
+## Devin cloud environment
+
+Snapshot blueprint `snapshot-blueprint-6a230441c0914e2ab5789c100d0e6424` installs
+`requirements.txt` + `pytest` + `uvicorn` (the last two are NOT in requirements.txt —
+`a2a-sdk[fastapi]` pulls fastapi but not uvicorn) and pre-builds `.vector_store/` offline.
+Run/manage it with `devin cloud drs ...`. `OPENAI_API_KEY` is stored as an org secret;
+`ANTHROPIC_API_KEY` is not set (agent falls back to OpenAI). The Spring Boot Employee API
+(`localhost:8080`) is not reachable from cloud sessions — employee tools degrade gracefully.

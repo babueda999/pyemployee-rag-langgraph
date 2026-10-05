@@ -12,6 +12,7 @@ class EmployeeGraphState(TypedDict):
     chat_history: Annotated[list[BaseMessage], add_messages]
     documents: list[Document]
     answer: str
+    grounded: bool  # set by the verify node (graph/nodes.py::make_verify_node)
 
 
 class EmployeeAgentState(TypedDict):

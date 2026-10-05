@@ -169,6 +169,52 @@
     color: var(--bubble-bot-text);
     border-bottom-left-radius: 4px;
   }
+  .proc-log {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+  .proc-line {
+    font-size: 12.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .badge.badge-rag { background: #dbeafe; color: #1e3a8a; }
+  .badge.badge-employee { background: #dcfce7; color: #14532d; }
+  .badge.badge-employee-java { background: #fef3c7; color: #78350f; }
+  @media (prefers-color-scheme: dark) {
+    .badge.badge-rag { background: #1e3a8a; color: #dbeafe; }
+    .badge.badge-employee { background: #14532d; color: #dcfce7; }
+    .badge.badge-employee-java { background: #78350f; color: #fef3c7; }
+  }
+  .proc-line.done { opacity: 0.65; }
+  .agent-tags {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .step-item .step-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
   .steps {
     margin-top: 8px;
     font-size: 12px;
@@ -182,7 +228,10 @@
     border: 1px solid var(--border);
     border-radius: 8px;
   }
-  .step-item .tool-name { font-weight: 600; margin-bottom: 4px; }
+  .step-item .tool-name { font-weight: 600; }
+  .bubble .chat-table { margin-top: 10px; font-size: 13px; }
+  .bubble .chat-table th, .bubble .chat-table td { padding: 6px 10px; }
+  .bubble .chat-table caption { text-align: left; color: var(--muted); font-size: 12px; padding-bottom: 4px; }
   .empty {
     margin: auto;
     text-align: center;
@@ -190,10 +239,27 @@
     font-size: 14px;
     padding: 0 24px;
   }
+  .role-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px 0;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .role-bar select {
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .role-hint { font-size: 12px; }
   form#ask-form {
     display: flex;
     gap: 8px;
-    padding: 12px 16px 18px;
+    padding: 10px 16px 18px;
     border-top: 1px solid var(--border);
     background: var(--bg);
   }
@@ -243,7 +309,7 @@
       <div id="employees-status" class="status-line">Loading…</div>
       <table id="employees-table" hidden>
         <thead>
-          <tr><th>ID</th><th>Name</th><th>Email</th><th>Department</th><th>Salary</th></tr>
+          <tr><th>ID</th><th>Name</th><th>Email</th><th>Department</th><th>Salary</th><th>Remote Eligible</th></tr>
         </thead>
         <tbody id="employees-body"></tbody>
       </table>
@@ -252,6 +318,15 @@
     <section id="assistant-panel" hidden>
       <div id="log">
         <div class="empty" id="empty-state">No questions yet — try "Is employee 1 eligible for remote work?"</div>
+      </div>
+      <div class="role-bar">
+        <label for="role-select">Acting as</label>
+        <select id="role-select">
+          <option value="USER">USER</option>
+          <option value="MANAGER" selected>MANAGER</option>
+          <option value="ADMIN">ADMIN</option>
+        </select>
+        <span id="role-hint" class="role-hint"></span>
       </div>
       <form id="ask-form">
         <input type="text" id="question" placeholder="Ask about policy, an employee, or both…" autocomplete="off" />
@@ -297,7 +372,8 @@
     for (const e of employees) {
       const tr = document.createElement('tr');
       const salary = e.salary != null ? `$${Number(e.salary).toLocaleString()}` : '';
-      tr.innerHTML = `<td>${e.id}</td><td>${e.firstName ?? ''} ${e.lastName ?? ''}</td><td>${e.email ?? ''}</td><td>${e.department ?? ''}</td><td>${salary}</td>`;
+      const remote = e.remoteWorkEligible === true ? 'Yes' : e.remoteWorkEligible === false ? 'No' : '';
+      tr.innerHTML = `<td>${e.id}</td><td>${e.firstName ?? ''} ${e.lastName ?? ''}</td><td>${e.email ?? ''}</td><td>${e.department ?? ''}</td><td>${salary}</td><td>${remote}</td>`;
       employeesBody.appendChild(tr);
     }
     employeesTable.hidden = false;
@@ -347,6 +423,19 @@
   const askForm = document.getElementById('ask-form');
   const questionInput = document.getElementById('question');
   const sendBtn = document.getElementById('send-btn');
+  const roleSelect = document.getElementById('role-select');
+  const roleHint = document.getElementById('role-hint');
+
+  // Capabilities enforced by the Java write agent's role guardrail —
+  // mirrored from AuthorizationGuardrail (READ/UPDATE/DELETE/SALARY sets).
+  const ROLE_HINTS = {
+    USER: 'read-only — can ask questions; updates, salary changes, and deletes are refused',
+    MANAGER: 'can update records & adjust salaries — cannot delete',
+    ADMIN: 'can update & request deletion — deletes still need human confirmation',
+  };
+  function updateRoleHint() { roleHint.textContent = ROLE_HINTS[roleSelect.value] || ''; }
+  roleSelect.addEventListener('change', updateRoleHint);
+  updateRoleHint();
   const emptyState = document.getElementById('empty-state');
   let conversationHistory = []; // [{role: 'user'|'assistant', content: string}]
 
@@ -363,6 +452,86 @@
     return row;
   }
 
+  // A bot row that shows a live "what's it doing" log (one line per tool
+  // call, badged by which agent handles it) above the answer text, so the
+  // user can see RAG Agent vs Employee Agent activity as it happens rather
+  // than only in the "Tools used" panel after the fact.
+  function addBotRow() {
+    if (emptyState) emptyState.remove();
+    const row = document.createElement('div');
+    row.className = 'row bot';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    const procLog = document.createElement('div');
+    procLog.className = 'proc-log';
+    const answerText = document.createElement('div');
+    answerText.className = 'typing';
+    answerText.textContent = 'Thinking…';
+    bubble.appendChild(procLog);
+    bubble.appendChild(answerText);
+    row.appendChild(bubble);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+    return { row, procLog, answerText };
+  }
+
+  function badgeClassFor(agentLabel) {
+    if (agentLabel === 'RAG Agent') return 'badge-rag';
+    if (agentLabel === 'Employee Agent (Java)') return 'badge-employee-java';
+    if (agentLabel === 'Employee Agent') return 'badge-employee';
+    return '';
+  }
+
+  // Mirror of TOOL_AGENT_LABELS in graph/run.py — keep in sync.
+  const AGENT_LABEL_FOR_TOOL = {
+    policy_search: 'RAG Agent',
+    get_employee: 'Employee Agent',
+    search_employee: 'Employee Agent',
+    list_employees: 'Employee Agent',
+    delegate_employee_write: 'Employee Agent (Java)',
+  };
+
+  function makeBadge(agentLabel) {
+    const badge = document.createElement('span');
+    badge.className = 'badge ' + badgeClassFor(agentLabel);
+    badge.textContent = agentLabel;
+    return badge;
+  }
+
+  function describeToolStart(evt) {
+    const args = evt.args || {};
+    switch (evt.tool) {
+      case 'policy_search':
+        return `searching policy docs for "${args.query ?? ''}"`;
+      case 'get_employee':
+        return `looking up employee ${args.employee_id ?? ''}`;
+      case 'search_employee': {
+        const bits = [];
+        if (args.name) bits.push(`name~"${args.name}"`);
+        if (args.department) bits.push(`department="${args.department}"`);
+        return `searching employees (${bits.join(', ') || 'all'})`;
+      }
+      case 'list_employees':
+        return 'listing all employees';
+      case 'delegate_employee_write':
+        return `delegating to Java agent: "${args.request ?? ''}"`;
+      default:
+        return evt.tool;
+    }
+  }
+
+  function addProcLine(procLog, evt) {
+    const line = document.createElement('div');
+    line.className = 'proc-line';
+    const badge = makeBadge(evt.agent);
+    const text = document.createElement('span');
+    text.textContent = describeToolStart(evt);
+    line.appendChild(badge);
+    line.appendChild(text);
+    procLog.appendChild(line);
+    return line;
+  }
+
   function addSteps(row, steps) {
     if (!steps || steps.length === 0) return;
     const details = document.createElement('details');
@@ -373,16 +542,99 @@
     for (const step of steps) {
       const item = document.createElement('div');
       item.className = 'step-item';
+      const head = document.createElement('div');
+      head.className = 'step-head';
+      head.appendChild(makeBadge(AGENT_LABEL_FOR_TOOL[step.tool] || 'Agent'));
       const name = document.createElement('div');
       name.className = 'tool-name';
       name.textContent = step.tool;
+      head.appendChild(name);
       const result = document.createElement('div');
       result.textContent = step.result.slice(0, 400);
-      item.appendChild(name);
+      item.appendChild(head);
       item.appendChild(result);
       details.appendChild(item);
     }
     row.querySelector('.bubble').after(details);
+  }
+
+  // Employee tools return one "id=…, name=…, email=…, department=…, salary=…"
+  // line per employee; render those as a real table under the answer instead
+  // of relying on the model to produce a markdown table.
+  const EMPLOYEE_TABLE_TOOLS = new Set(['get_employee', 'search_employee', 'list_employees']);
+
+  function parseEmployeeRows(result) {
+    if (typeof result !== 'string') return [];
+    const rows = [];
+    for (const line of result.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('id=')) continue;
+      const fields = {};
+      for (const part of trimmed.split(/, (?=[a-zA-Z_]+=)/)) {
+        const i = part.indexOf('=');
+        if (i > 0) fields[part.slice(0, i)] = part.slice(i + 1);
+      }
+      if (fields.id !== undefined) rows.push(fields);
+    }
+    return rows;
+  }
+
+  function buildEmployeeTable(rows) {
+    const table = document.createElement('table');
+    table.className = 'chat-table';
+    const caption = document.createElement('caption');
+    caption.textContent = `${rows.length} employee${rows.length === 1 ? '' : 's'}`;
+    table.appendChild(caption);
+    table.innerHTML += '<thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Department</th><th>Salary</th><th>Remote Eligible</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      const cells = ['id', 'name', 'email', 'department'].map((k) => {
+        const td = document.createElement('td');
+        td.textContent = r[k] ?? '';
+        return td;
+      });
+      const salaryTd = document.createElement('td');
+      const salaryNum = Number(r.salary);
+      salaryTd.textContent = r.salary && Number.isFinite(salaryNum)
+        ? `$${salaryNum.toLocaleString()}`
+        : (r.salary ?? '');
+      cells.push(salaryTd);
+      const remoteTd = document.createElement('td');
+      remoteTd.textContent = r.remote_work_eligible === 'True' || r.remote_work_eligible === 'true'
+        ? 'Yes'
+        : r.remote_work_eligible === 'False' || r.remote_work_eligible === 'false'
+          ? 'No'
+          : (r.remote_work_eligible ?? '');
+      cells.push(remoteTd);
+      cells.forEach((td) => tr.appendChild(td));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  // Persistent "which agent(s) answered" tag under each bot answer, so the
+  // RAG Agent / Employee Agent attribution stays visible after the live
+  // proc-log lines scroll or collapse.
+  function addAgentTags(row, toolCalls, role) {
+    const agents = [...new Set(toolCalls.map(([tool]) => AGENT_LABEL_FOR_TOOL[tool] || 'Agent'))];
+    if (!agents.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'agent-tags';
+    wrap.append('Answered by');
+    for (const a of agents) wrap.appendChild(makeBadge(a));
+    if (agents.includes('Employee Agent (Java)')) wrap.append(` — write role ${role}`);
+    row.querySelector('.bubble').appendChild(wrap);
+  }
+
+  function addEmployeeTables(row, toolCalls) {
+    const bubble = row.querySelector('.bubble');
+    for (const [tool, result] of toolCalls) {
+      if (!EMPLOYEE_TABLE_TOOLS.has(tool)) continue;
+      const rows = parseEmployeeRows(result);
+      if (rows.length) bubble.appendChild(buildEmployeeTable(rows));
+    }
   }
 
   askForm.addEventListener('submit', async (e) => {
@@ -394,29 +646,63 @@
     questionInput.value = '';
     sendBtn.disabled = true;
 
-    const typingRow = addMessage('bot', '');
-    typingRow.querySelector('.bubble').classList.add('typing');
-    typingRow.querySelector('.bubble').textContent = 'Thinking…';
+    const { row, procLog, answerText } = addBotRow();
+    const activeLines = {};
 
     try {
-      const res = await fetch('/api/ask', {
+      const res = await fetch('/api/ask/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, history: conversationHistory }),
+        body: JSON.stringify({ question, history: conversationHistory, role: roleSelect.value }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `Request failed: ${res.status}`);
       }
-      const data = await res.json();
-      typingRow.querySelector('.bubble').classList.remove('typing');
-      typingRow.querySelector('.bubble').textContent = data.answer;
-      addSteps(typingRow, data.steps);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalData = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const dataLine = rawEvent.split('\n').find((l) => l.startsWith('data: '));
+          if (!dataLine) continue;
+          const evt = JSON.parse(dataLine.slice(6));
+
+          if (evt.type === 'tool_start') {
+            activeLines[evt.tool] = addProcLine(procLog, evt);
+            log.scrollTop = log.scrollHeight;
+          } else if (evt.type === 'tool_end') {
+            const line = activeLines[evt.tool];
+            if (line) line.classList.add('done');
+          } else if (evt.type === 'final') {
+            finalData = evt;
+          }
+        }
+      }
+
+      if (!finalData) throw new Error('No response received.');
+
+      answerText.classList.remove('typing');
+      answerText.textContent = finalData.answer;
+      addAgentTags(row, finalData.tool_calls, roleSelect.value);
+      addEmployeeTables(row, finalData.tool_calls);
+      const steps = finalData.tool_calls.map(([tool, result]) => ({ tool, result }));
+      addSteps(row, steps);
       conversationHistory.push({ role: 'user', content: question });
-      conversationHistory.push({ role: 'assistant', content: data.answer });
+      conversationHistory.push({ role: 'assistant', content: finalData.answer });
     } catch (err) {
-      typingRow.querySelector('.bubble').classList.remove('typing');
-      typingRow.querySelector('.bubble').textContent = 'Something went wrong: ' + err.message;
+      answerText.classList.remove('typing');
+      answerText.textContent = 'Something went wrong: ' + err.message;
     } finally {
       sendBtn.disabled = false;
       log.scrollTop = log.scrollHeight;

@@ -24,7 +24,7 @@ class DelegateAgentError(Exception):
     """Raised when the Java agent is unreachable or returns no reply."""
 
 
-async def _send_to_java_agent(base_url: str, text: str) -> str:
+async def _send_to_java_agent(base_url: str, text: str, auth_role: str) -> str:
     # httpx's 5s default is too tight for a call that's backed by an LLM
     # round trip on the Java side; supply our own client with more headroom
     # rather than hanging forever on a dead agent.
@@ -34,7 +34,7 @@ async def _send_to_java_agent(base_url: str, text: str) -> str:
     client = await factory.create_from_url(base_url)
     try:
         message = new_text_message(text, role=Role.ROLE_USER)
-        message.metadata.update({"authRole": DELEGATED_ROLE})
+        message.metadata.update({"authRole": auth_role})
         request = SendMessageRequest(message=message)
 
         async for response in client.send_message(request):
@@ -62,24 +62,32 @@ async def _send_to_java_agent(base_url: str, text: str) -> str:
         await client.close()
 
 
-def make_java_agent_delegate_tool(base_url: str):
+def make_java_agent_delegate_tool(base_url: str, role: str = DELEGATED_ROLE):
     @tool
     def delegate_employee_write(request: str) -> str:
-        """Delegate an employee record UPDATE or SALARY ADJUSTMENT to the
-        Java Employee Agent (e.g. "update employee 3's department to Sales",
-        "give employee 7 a 10% raise"). Runs as a MANAGER-level request. Do
-        NOT use this for deletion — the Java agent will refuse it at that
-        role, and this tool must never be used to attempt one. Do not use
-        this for read-only lookups; use get_employee/search_employee/
-        list_employees instead."""
+        """Delegate an employee record UPDATE, SALARY ADJUSTMENT, or — ADMIN
+        delegation role only — DELETE request to the Java Employee Agent
+        (e.g. "update employee 3's department to Sales", "give employee 7 a
+        10% raise"). What the Java side allows depends on the configured
+        role: USER can neither update nor delete; MANAGER can update records
+        and adjust salaries; ADMIN can update and request deletion (the Java
+        side still holds every deletion for human confirmation before it
+        runs). For a record update you must first fetch the employee's
+        current record with get_employee and include ALL current field
+        values (firstName, lastName, email, department, salary) in the
+        request, changed fields included; the Java side replaces the whole
+        record and, at MANAGER, cannot look the old one up. Salary
+        raises/cuts/percentage changes do not need a read — the Java side
+        computes the new salary itself. Do not use this for read-only
+        lookups; use get_employee/search_employee/list_employees instead."""
         request = (request or "").strip()
         if not request:
             return "Invalid request: must not be empty."
-        if "delete" in request.lower():
+        if "delete" in request.lower() and role != "ADMIN":
             return "This tool does not perform deletions. Refusing to forward the request."
 
         try:
-            return asyncio.run(_send_to_java_agent(base_url, request))
+            return asyncio.run(_send_to_java_agent(base_url, request, role))
         except DelegateAgentError as exc:
             return f"Employee agent is currently unavailable: {exc}"
         except Exception as exc:  # noqa: BLE001 - network/transport errors from the A2A client

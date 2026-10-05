@@ -23,7 +23,8 @@ def _format_employee(employee: dict) -> str:
         f"name={employee.get('firstName')} {employee.get('lastName')}, "
         f"email={employee.get('email')}, "
         f"department={employee.get('department')}, "
-        f"salary={employee.get('salary')}"
+        f"salary={employee.get('salary')}, "
+        f"remote_work_eligible={employee.get('remoteWorkEligible')}"
     )
 
 
