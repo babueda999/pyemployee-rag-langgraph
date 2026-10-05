@@ -5,4 +5,4 @@ __pycache__/
 .vector_store/
 *.egg-info/
 .pytest_cache/
-.devin/mcp_config.local.json
+.devin/*.local.json
